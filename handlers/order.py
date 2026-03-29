@@ -43,6 +43,7 @@ async def send_to_admins(bot: Bot, text: str = None, photo: str = None,
                                        parse_mode=parse_mode, reply_markup=reply_markup)
         except Exception:
             pass
+        await asyncio.sleep(0.05)
 
 
 async def _try_use_saved_phones(user_id: int, state: FSMContext):
@@ -114,8 +115,9 @@ async def start_checkout(callback: CallbackQuery, state: FSMContext):
         )
         try:
             await callback.message.edit_text(text, parse_mode="HTML", reply_markup=night_delivery_kb())
-        except Exception:
-            await callback.message.answer(text, parse_mode="HTML", reply_markup=night_delivery_kb())
+        except Exception as e:
+            if "not modified" not in str(e).lower():
+                await callback.message.answer(text, parse_mode="HTML", reply_markup=night_delivery_kb())
     else:
         await state.set_state(OrderState.choosing_delivery)
         text = (
@@ -125,8 +127,9 @@ async def start_checkout(callback: CallbackQuery, state: FSMContext):
         )
         try:
             await callback.message.edit_text(text, parse_mode="HTML", reply_markup=delivery_type_kb())
-        except Exception:
-            await callback.message.answer(text, parse_mode="HTML", reply_markup=delivery_type_kb())
+        except Exception as e:
+            if "not modified" not in str(e).lower():
+                await callback.message.answer(text, parse_mode="HTML", reply_markup=delivery_type_kb())
     await callback.answer()
 
 
@@ -176,8 +179,9 @@ async def dlv_courier(callback: CallbackQuery, state: FSMContext):
     )
     try:
         await callback.message.edit_text(text, parse_mode="HTML", reply_markup=delivery_pay_kb())
-    except Exception:
-        await callback.message.answer(text, parse_mode="HTML", reply_markup=delivery_pay_kb())
+    except Exception as e:
+        if "not modified" not in str(e).lower():
+            await callback.message.answer(text, parse_mode="HTML", reply_markup=delivery_pay_kb())
     await callback.answer()
 
 
@@ -191,8 +195,9 @@ async def dlv_pickup(callback: CallbackQuery, state: FSMContext):
     text = "💳 <b>Qanday to'lamoqchisiz?</b>"
     try:
         await callback.message.edit_text(text, parse_mode="HTML", reply_markup=delivery_pay_kb())
-    except Exception:
-        await callback.message.answer(text, parse_mode="HTML", reply_markup=delivery_pay_kb())
+    except Exception as e:
+        if "not modified" not in str(e).lower():
+            await callback.message.answer(text, parse_mode="HTML", reply_markup=delivery_pay_kb())
     await callback.answer()
 
 
@@ -217,8 +222,9 @@ async def dpay_back(callback: CallbackQuery, state: FSMContext):
     )
     try:
         await callback.message.edit_text(text, parse_mode="HTML", reply_markup=delivery_type_kb())
-    except Exception:
-        await callback.message.answer(text, parse_mode="HTML", reply_markup=delivery_type_kb())
+    except Exception as e:
+        if "not modified" not in str(e).lower():
+            await callback.message.answer(text, parse_mode="HTML", reply_markup=delivery_type_kb())
     await callback.answer()
 
 @router.callback_query(OrderState.choosing_delivery_pay, F.data == "dpay:card")

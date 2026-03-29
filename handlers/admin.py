@@ -196,7 +196,6 @@ async def admin_action(callback: CallbackQuery, bot: Bot, state: FSMContext):
             await callback.answer("⚠️ Buyurtma hali tayyorlanmagan!", show_alert=True)
             return
         update_order_status(order_id, "on_the_way")
-        from keyboards.inline import taxi_choice_kb
         await notify_user(bot, order["user_id"],
             f"🚚 <b>Buyurtma #{order_id} yo'lda!</b>\n\n"
             f"Buyurtmangizni taksiga topshirdik.\n"
@@ -205,11 +204,6 @@ async def admin_action(callback: CallbackQuery, bot: Bot, state: FSMContext):
             f"Ishtahangiz chog' bo'lsin! 😊"
         )
         try:
-            await bot.send_message(
-                chat_id=order["user_id"],
-                text="Agar fikringiz o'zgardi — o'zingiz olib ketishingiz ham mumkin:",
-                reply_markup=taxi_choice_kb(order_id)
-            )
             await bot.send_message(
                 chat_id=order["user_id"],
                 text="⭐ <b>Xizmatimizni baholang:</b>",
@@ -1581,8 +1575,9 @@ async def recv_work_hours(message: Message, state: FSMContext):
         return
     import re as _re
     text = message.text.strip()
-    # Raqamlarni ajratib olamiz
-    nums = _re.findall(r'\d+', text)
+    # Raqamlarni ajratib olamiz (daqiqa qismini olib tashlaymiz)
+    clean_text = _re.sub(r':\d{2}', '', text)
+    nums = _re.findall(r'\d+', clean_text)
     if len(nums) < 2:
         await message.answer(
             "❌ Noto'g'ri format!\n"
