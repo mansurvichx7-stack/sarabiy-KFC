@@ -1,10 +1,20 @@
 """
 database.py — SQLite ma'lumotlar bazasi
 """
-
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional
+from zoneinfo import ZoneInfo
+UZ_TZ = ZoneInfo("Asia/Tashkent")
+
+def now_uz():
+    return datetime.now(UZ_TZ)
+
+def now_uz_str():
+    return now_uz().strftime("%Y-%m-%d %H:%M")
+
+def today_uz_str():
+    return now_uz().strftime("%Y-%m-%d")
 
 DB_PATH = "sarabiy_kfc.db"
 
@@ -20,14 +30,11 @@ def get_conn() -> sqlite3.Connection:
 def backup_db():
     """DB ning nusxasini oladi"""
     import shutil
-    from datetime import datetime
-    backup_name = f"sarabiy_kfc_backup_{datetime.now().strftime('%Y%m%d')}.db"
+    backup_name = f"sarabiy_kfc_backup_{now_uz().strftime('%Y%m%d')}.db"
     try:
         shutil.copy2(DB_PATH, backup_name)
     except Exception:
         pass
-
-
 # ══════════════════════════════════════════
 # JADVALLAR
 # ══════════════════════════════════════════
@@ -275,7 +282,7 @@ def check_spam(user_id: int, timeout: float = 3.0) -> bool:
 def register_user(telegram_id: int, full_name: str, username: Optional[str]):
     conn = get_conn()
     try:
-        now = datetime.now().strftime("%Y-%m-%d %H:%M")
+        now = now_uz_str()
         conn.execute(
             """INSERT OR IGNORE INTO users
                (telegram_id, full_name, username, created_at, last_active)
@@ -375,28 +382,33 @@ def get_categories(check_work_hours: bool = True) -> list:
     """Kategoriyalarni qaytaradi. Ish vaqtidan tashqari faqat always_open=1 lar."""
     conn = get_conn()
     try:
-        from datetime import datetime
         from config import WORK_START as CFG_START, WORK_END as CFG_END
 
-        # DB dagi sozlamalarni birinchi o'qiymiz
         row = conn.execute("SELECT value FROM settings WHERE key='work_hours'").fetchone()
+
         if row and row["value"]:
             try:
                 parts = row["value"].replace(" ", "").split("-")
-                start = int(parts[0].split(":")[0])
-                end = int(parts[1].split(":")[0])
+                start_h, start_m = map(int, parts[0].split(":"))
+                end_h, end_m = map(int, parts[1].split(":"))
             except Exception:
-                start, end = CFG_START, CFG_END
+                start_h, start_m = CFG_START
+                end_h, end_m = CFG_END
         else:
-            start, end = CFG_START, CFG_END
+            start_h, start_m = CFG_START
+            end_h, end_m = CFG_END
 
         is_work_time = True
-        if check_work_hours and start is not None and end is not None:
-            h = datetime.now().hour
-            if start <= end:
-                is_work_time = start <= h < end
+        if check_work_hours and start_h is not None and end_h is not None:
+            now = now_uz()
+            current_minutes = now.hour * 60 + now.minute
+            start_minutes = start_h * 60 + start_m
+            end_minutes = end_h * 60 + end_m
+
+            if start_minutes <= end_minutes:
+                is_work_time = start_minutes <= current_minutes < end_minutes
             else:
-                is_work_time = h >= start or h < end
+                is_work_time = current_minutes >= start_minutes or current_minutes < end_minutes
 
         if is_work_time:
             return conn.execute(
@@ -408,7 +420,6 @@ def get_categories(check_work_hours: bool = True) -> list:
             ).fetchall()
     finally:
         conn.close()
-
 
 def get_all_categories() -> list:
     conn = get_conn()
@@ -770,7 +781,6 @@ def clear_cart(user_id: int):
 # ══════════════════════════════════════════
 # BUYURTMALAR
 # ══════════════════════════════════════════
-
 def create_order(
     user_id: int, items_text: str, cart_total: int,
     delivery_type: str, delivery_pay: str,
@@ -788,7 +798,7 @@ def create_order(
                VALUES (?,?,?,0,?,?,?,?,?,?,?,?,?,?)""",
             (user_id, items_text, cart_total, cart_total,
              delivery_type, delivery_pay, address, latitude, longitude,
-             phone1, phone2, status, datetime.now().strftime("%Y-%m-%d %H:%M"))
+             phone1, phone2, status, now_uz_str())
         )
         conn.commit()
         return cur.lastrowid
@@ -984,8 +994,7 @@ def get_weekly_stats() -> dict:
     """Haftalik statistika"""
     conn = get_conn()
     try:
-        from datetime import datetime, timedelta
-        today = datetime.now()
+        today = now_uz()
         week_ago = (today - timedelta(days=7)).strftime("%Y-%m-%d")
 
         r = conn.execute(
@@ -1004,12 +1013,11 @@ def get_weekly_stats() -> dict:
             (week_ago, *ADMIN_IDS)
         ).fetchone()["cnt"]
 
-        # Top mahsulotlar
         top_products = conn.execute(
             """SELECT p.name, p.order_count
                FROM products p
                WHERE p.is_active=1
-               ORDER BY p.order_count DESC LIMIT 3""",
+               ORDER BY p.order_count DESC LIMIT 3"""
         ).fetchall()
 
         return {
@@ -1023,12 +1031,10 @@ def get_weekly_stats() -> dict:
         }
     finally:
         conn.close()
-
-
 def get_today_stats() -> dict:
     conn = get_conn()
     try:
-        today = datetime.now().strftime("%Y-%m-%d")
+        today = today_uz_str()
         orders = conn.execute(
             """SELECT COUNT(*) as cnt, COALESCE(SUM(total_price),0) as total
                FROM orders WHERE created_at LIKE ? AND status NOT IN ('cancelled','pending')""",
@@ -1051,14 +1057,13 @@ def get_today_stats() -> dict:
         ).fetchall()
         return {
             "order_count": orders["cnt"] or 0,
-            "total":       orders["total"] or 0,
-            "avg_rating":  round(avg["avg"] or 0, 1),
-            "new_users":   new_users["cnt"] or 0,
+            "total": orders["total"] or 0,
+            "avg_rating": round(avg["avg"] or 0, 1),
+            "new_users": new_users["cnt"] or 0,
             "top_products": top_products,
         }
     finally:
         conn.close()
-
 
 # ══════════════════════════════════════════
 # CHEGIRMALAR
@@ -1070,7 +1075,7 @@ def set_discount(user_id: int, dtype: str, amount: int):
         conn.execute(
             """INSERT OR REPLACE INTO discounts (user_id, type, amount, created_at)
                VALUES (?,?,?,?)""",
-            (user_id, dtype, amount, datetime.now().strftime("%Y-%m-%d %H:%M"))
+            (user_id, dtype, amount, now_uz_str())
         )
         conn.commit()
     finally:
@@ -1122,7 +1127,7 @@ def save_rating(user_id: int, order_id: int, stars: int):
         conn.execute(
             """INSERT OR REPLACE INTO ratings (user_id, order_id, stars, created_at)
                VALUES (?,?,?,?)""",
-            (user_id, order_id, stars, datetime.now().strftime("%Y-%m-%d %H:%M"))
+            (user_id, order_id, stars, now_uz_str())
         )
         conn.execute(
             "UPDATE orders SET rating=? WHERE id=?", (stars, order_id)

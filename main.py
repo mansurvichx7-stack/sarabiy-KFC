@@ -1,14 +1,14 @@
-"""
-main.py — Sarabiy KFC Bot
-"""
-
 import asyncio
 import logging
+import time as _time
+
+from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
+from typing import Any, Callable, Awaitable
 
 from aiogram import Bot, Dispatcher, BaseMiddleware
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import Update
-from typing import Any, Callable, Awaitable
 
 from config import BOT_TOKEN, ADMIN_ID, ADMIN_IDS, CHANNEL_ID, CHANNEL_LINK, CHANNEL_NAME
 from database import init_db, backup_db, get_weekly_stats
@@ -21,6 +21,12 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+UZ_TZ = ZoneInfo("Asia/Tashkent")
+
+
+def now_uz():
+    return datetime.now(UZ_TZ)
+
 
 async def daily_backup():
     """Har 24 soatda DB backup oladi"""
@@ -32,12 +38,12 @@ async def daily_backup():
 
 async def weekly_stats(bot: Bot):
     """Har shanba kuni adminga haftalik statistika yuboradi"""
-    from datetime import datetime, timedelta
     while True:
-        now = datetime.now()
+        now = now_uz()
         days_until_saturday = (5 - now.weekday()) % 7
         if days_until_saturday == 0 and now.hour >= 9:
             days_until_saturday = 7
+
         next_saturday = now.replace(hour=9, minute=0, second=0, microsecond=0) + timedelta(days=days_until_saturday)
         wait_seconds = (next_saturday - now).total_seconds()
         await asyncio.sleep(wait_seconds)
@@ -67,7 +73,6 @@ async def weekly_stats(bot: Bot):
 
 async def check_night_menu(bot: Bot):
     """Har kuni ish vaqti tugashidan 30 daqiqa oldin tekshiradi"""
-    from datetime import datetime, timedelta
     from database import get_conn as _gc
 
     while True:
@@ -75,11 +80,15 @@ async def check_night_menu(bot: Bot):
         WORK_END = _cfg.WORK_END
 
         if WORK_END is not None:
-            now = datetime.now()
-            check_hour = WORK_END - 1 if WORK_END > 0 else 23
-            next_check = now.replace(hour=check_hour, minute=30, second=0, microsecond=0)
+            now = now_uz()
+
+            end_hour, end_minute = WORK_END
+            end_dt = now.replace(hour=end_hour, minute=end_minute, second=0, microsecond=0)
+            next_check = end_dt - timedelta(minutes=30)
+
             if now >= next_check:
                 next_check += timedelta(days=1)
+
             await asyncio.sleep((next_check - now).total_seconds())
         else:
             await asyncio.sleep(3600)
@@ -94,13 +103,13 @@ async def check_night_menu(bot: Bot):
 
             if always_open == 0:
                 import config as _cfg2
-                we = _cfg2.WORK_END
+                we_hour, we_minute = _cfg2.WORK_END
                 for admin_id in ADMIN_IDS:
                     await bot.send_message(
                         chat_id=admin_id,
                         text=(
                             f"⚠️ <b>Diqqat!</b>\n\n"
-                            f"Ish vaqti {we:02d}:00 da tugaydi.\n\n"
+                            f"Ish vaqti {we_hour:02d}:{we_minute:02d} da tugaydi.\n\n"
                             f"🌙 <b>\"Doim ochiq\" kategoriya yo'q!</b>\n"
                             f"Kechasi foydalanuvchilar menyu ko'ra olmaydi.\n\n"
                             f"🍽 Kategoriyalar → kategoriyani tanlang → 🌙 Doim ochiq qilish"
@@ -111,13 +120,11 @@ async def check_night_menu(bot: Bot):
             logger.error(f"Night menu check xatosi: {e}")
 
 
-import time as _time
-_sub_cache: dict = {}  # {user_id: timestamp} — obunali foydalanuvchilar cache
-_SUB_CACHE_TTL = 3600  # 1 soat
+_sub_cache: dict = {}
+_SUB_CACHE_TTL = 3600
+
 
 class SubMiddleware(BaseMiddleware):
-    """Kanal obuna tekshiruvi — Message va CallbackQuery uchun"""
-
     async def __call__(
         self,
         handler: Callable[[Update, dict], Awaitable[Any]],
@@ -127,26 +134,20 @@ class SubMiddleware(BaseMiddleware):
         if not CHANNEL_ID:
             return await handler(event, data)
 
-        # aiogram 3.x: event bu Update emas, balki Message yoki CallbackQuery
-        # data["event_from_user"] — aiogram 3 da har doim mavjud
         user = data.get("event_from_user")
         if not user:
             return await handler(event, data)
 
-        # Admin tekshiruvi
         if user.id in ADMIN_IDS:
             return await handler(event, data)
 
-        # check_sub callback — cacheni tozalab o'tkazib yuboramiz
-        if hasattr(event, 'data') and event.data == "check_sub":
+        if hasattr(event, "data") and event.data == "check_sub":
             _sub_cache.pop(user.id, None)
             return await handler(event, data)
 
-        # /start komandasi — o'tkazib yuboramiz
-        if hasattr(event, 'text') and event.text and event.text.startswith('/start'):
+        if hasattr(event, "text") and event.text and event.text.startswith("/start"):
             return await handler(event, data)
 
-        # Cache tekshiruvi — 1 soat ichida obunali bo'lsa qayta tekshirmaymiz
         now = _time.time()
         cached = _sub_cache.get(user.id)
         if cached and now - cached < _SUB_CACHE_TTL:
@@ -164,18 +165,15 @@ class SubMiddleware(BaseMiddleware):
             )
             kb = subscribe_kb(CHANNEL_LINK)
             try:
-                if hasattr(event, 'data'):
-                    # CallbackQuery
+                if hasattr(event, "data"):
                     await event.answer("❌ Avval kanalga obuna bo'ling!", show_alert=True)
                     await event.message.answer(text, parse_mode="HTML", reply_markup=kb)
                 else:
-                    # Message
                     await event.answer(text, parse_mode="HTML", reply_markup=kb)
             except Exception:
                 pass
             return None
 
-        # Obunali — cachega yozamiz
         _sub_cache[user.id] = now
         return await handler(event, data)
 
@@ -185,7 +183,6 @@ async def main():
     backup_db()
     logger.info("✅ Ma'lumotlar bazasi tayyor")
 
-    # Bot restart bo'lganida osilib qolgan kechki buyurtmalarni bekor qilish
     try:
         from database import get_conn as _gc
         conn = _gc()
@@ -204,7 +201,6 @@ async def main():
     bot = Bot(token=BOT_TOKEN)
     dp = Dispatcher(storage=MemoryStorage())
 
-    # Routerlar (admin birinchi)
     dp.include_router(admin.router)
     dp.include_router(start.router)
     dp.include_router(menu.router)
@@ -212,8 +208,8 @@ async def main():
     dp.include_router(order.router)
     dp.include_router(contact.router)
 
-    # Xatolik logi
     from aiogram.types import ErrorEvent
+
     @dp.errors()
     async def on_error(event: ErrorEvent):
         logger.error(f"Xatolik: {event.exception}", exc_info=True)
@@ -226,7 +222,7 @@ async def main():
             )
         except Exception:
             pass
-    # Vaqtincha majburiy obuna o'chirilgan
+
     dp.message.middleware(SubMiddleware())
     dp.callback_query.middleware(SubMiddleware())
 
@@ -242,3 +238,4 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+    
